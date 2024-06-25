@@ -64,7 +64,8 @@ func (*FS) Type() storage.Type {
 }
 
 func (fs *FS) Save(name string, data io.Reader, _ int64) error {
-	filepath := path.Join(fs.root, name)
+	filepath := path.Join(fs.root, name+".tmp")
+	finalpath := path.Join(fs.root, name)
 
 	err := os.MkdirAll(path.Dir(filepath), os.ModeDir|0o755)
 	if err != nil {
@@ -87,7 +88,18 @@ func (fs *FS) Save(name string, data io.Reader, _ int64) error {
 		return errors.Wrapf(err, "copy file <%s>", filepath)
 	}
 
-	return errors.Wrap(fw.Sync(), "write to file")
+	err = fw.Sync()
+	if err != nil {
+		return errors.Wrapf(err, "sync file <%s>", filepath)
+	}
+
+	err = fw.Close()
+	if err != nil {
+		return errors.Wrapf(err, "close file <%s>", filepath)
+	}
+
+	err = os.Rename(filepath, finalpath)
+	return errors.Wrapf(err, "rename <%s> to <%s>", filepath, finalpath)
 }
 
 func (fs *FS) SourceReader(name string) (io.ReadCloser, error) {
@@ -158,7 +170,8 @@ func (fs *FS) Copy(src, dst string) error {
 		return errors.Wrap(err, "open src")
 	}
 
-	destFilename := path.Join(fs.root, dst)
+	destFilename := path.Join(fs.root, dst+".tmp")
+	finalFilename := path.Join(fs.root, dst)
 	err = os.MkdirAll(path.Dir(destFilename), os.ModeDir|0o755)
 	if err != nil {
 		return errors.Wrap(err, "create dst dir")
@@ -168,8 +181,25 @@ func (fs *FS) Copy(src, dst string) error {
 	if err != nil {
 		return errors.Wrap(err, "create dst")
 	}
+	defer to.Close()
+
 	_, err = io.Copy(to, from)
-	return err
+	if err != nil {
+		return errors.Wrapf(err, "copy to <%s>", destFilename)
+	}
+
+	err = to.Sync()
+	if err != nil {
+		return errors.Wrapf(err, "sync file <%s>", destFilename)
+	}
+
+	err = to.Close()
+	if err != nil {
+		return errors.Wrapf(err, "close file <%s>", destFilename)
+	}
+
+	err = os.Rename(destFilename, finalFilename)
+	return errors.Wrapf(err, "rename <%s> to <%s>", destFilename, finalFilename)
 }
 
 // Delete deletes given file from FS.
